@@ -1,0 +1,9 @@
+[package]
+name = "kitti_dataset_slam"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+version.workspace = true
+
+[dependencies]
+rslam-dataset-reader.workspace = true

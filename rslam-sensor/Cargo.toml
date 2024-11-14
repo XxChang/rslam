@@ -1,0 +1,11 @@
+[package]
+name = "rslam-sensor"
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+version.workspace = true
+
+[dependencies]
+num = "0.4.3"
+serde.workspace = true
+sophus.workspace = true

@@ -7,12 +7,12 @@ pub struct DatasetIterator<'a, I> {
 
 impl<'a, I> DatasetIterator<'a, I> {
     pub fn new<D>(dataset: &'a D) -> Self
-    where 
-        D: Dataset<I>
+    where
+        D: Dataset<I>,
     {
         DatasetIterator {
             current: 0,
-            dataset
+            dataset,
         }
     }
 }
@@ -33,7 +33,7 @@ pub trait Dataset<I>: Send + Sync {
 
     fn iter(&self) -> DatasetIterator<'_, I>
     where
-        Self: Sized
+        Self: Sized,
     {
         DatasetIterator::new(self)
     }
