@@ -1,5 +1,5 @@
 [package]
-name = "rslam-core"
+name = "proslam"
 edition.workspace = true
 license.workspace = true
 readme.workspace = true
@@ -7,3 +7,6 @@ version.workspace = true
 
 [dependencies]
 serde.workspace = true
+anyhow.workspace = true
+opencv.workspace = true
+log.workspace = true

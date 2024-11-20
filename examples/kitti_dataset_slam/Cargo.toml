@@ -7,3 +7,9 @@ version.workspace = true
 
 [dependencies]
 rslam-dataset-reader.workspace = true
+rslam-core.workspace = true
+rslam-sensor.workspace = true
+proslam.workspace = true
+opencv.workspace = true
+rerun.workspace = true
+env_logger = "0.11.5"

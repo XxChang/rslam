@@ -1,4 +1,4 @@
 pub trait Camera {
-    const WIDTH: usize;
-    const HEIGHT: usize;
+    fn rows(&self) -> usize;
+    fn cols(&self) -> usize;
 }
