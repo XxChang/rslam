@@ -1,4 +1,7 @@
-use opencv::{imgcodecs::imread_def, prelude::*};
+use opencv::{
+    imgcodecs::{imread, IMREAD_GRAYSCALE},
+    prelude::*,
+};
 use rslam_core::Camera;
 use rslam_sensor::HasStereoCamera;
 use sophus::{
@@ -91,12 +94,19 @@ impl HasStereoCamera for &mut KittiReader {
             .dataset_path
             .join("image_1")
             .join(format!("{:06}.png", self.current_frame_index));
-
+        log::debug!(
+            "left_image_path: {:?}, right_image_path: {:?}",
+            left_image_path,
+            right_image_path
+        );
         if let (Ok(left_image), Ok(right_image)) = (
-            imread_def(&left_image_path.display().to_string()),
-            imread_def(&right_image_path.display().to_string()),
+            imread(&left_image_path.display().to_string(), IMREAD_GRAYSCALE),
+            imread(&right_image_path.display().to_string(), IMREAD_GRAYSCALE),
         ) {
             self.current_frame_index += 1;
+            if left_image.empty() || right_image.empty() {
+                return None;
+            }
             Some((left_image, right_image))
         } else {
             None

@@ -11,3 +11,4 @@ rslam-core.workspace = true
 rslam-sensor.workspace = true
 sophus.workspace = true
 opencv.workspace = true
+log.workspace = true
