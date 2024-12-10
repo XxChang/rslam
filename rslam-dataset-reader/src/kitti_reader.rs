@@ -29,6 +29,11 @@ impl KittiReader {
         }
     }
 
+    pub fn get_timestamp(&mut self) -> f64 {
+        self.current_frame_index += 1;
+        self.timestamp[self.current_frame_index]
+    }
+    
     pub fn load_camera(&mut self) {
         let calib_file_path = self.dataset_path.join("calib.txt");
 
@@ -103,7 +108,6 @@ impl HasStereoCamera for &mut KittiReader {
             imread(&left_image_path.display().to_string(), IMREAD_GRAYSCALE),
             imread(&right_image_path.display().to_string(), IMREAD_GRAYSCALE),
         ) {
-            self.current_frame_index += 1;
             if left_image.empty() || right_image.empty() {
                 return None;
             }
