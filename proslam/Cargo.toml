@@ -10,3 +10,4 @@ serde.workspace = true
 anyhow.workspace = true
 opencv.workspace = true
 log.workspace = true
+rslam-core.workspace = true

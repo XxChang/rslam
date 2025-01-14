@@ -14,3 +14,11 @@ impl Default for FramePointGeneratorConfig {
         }
     }
 }
+
+pub trait HasFrame {
+    
+}
+
+pub trait IsFramePoint {
+    fn id() -> usize;    
+}

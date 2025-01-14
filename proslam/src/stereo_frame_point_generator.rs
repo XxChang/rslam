@@ -12,6 +12,8 @@ use opencv::{
 };
 use serde::Deserialize;
 
+use crate::stereo_framepoint::IntensityFeature;
+
 #[derive(Debug, Deserialize)]
 pub struct StereoFramePointGeneratorCfg {
     number_of_detectors_vertical: usize,
@@ -25,6 +27,8 @@ pub struct StereoFramePointGeneratorCfg {
     bin_size_pixels: usize,
     maximum_matching_distance_triangulation: i32,
     descriptor_type: String,
+
+    maximum_epipolar_search_offset_pixels: i32,
 }
 
 impl Default for StereoFramePointGeneratorCfg {
@@ -41,6 +45,8 @@ impl Default for StereoFramePointGeneratorCfg {
 
             maximum_matching_distance_triangulation: (0.2 * 256f32) as i32,
             descriptor_type: String::from("ORB-256"),
+
+            maximum_epipolar_search_offset_pixels: 0,
         }
     }
 }
@@ -121,6 +127,13 @@ impl StereoFramePointGeneratorCfg {
             }
         };
 
+        let mut epipolar_search_offset_pixels = vec![0];
+        for i in 1..self.maximum_epipolar_search_offset_pixels {
+            epipolar_search_offset_pixels.push(i);
+            epipolar_search_offset_pixels.push(-i);
+        }
+        log::info!("number of epipolar lines considered for stereo matching: {}", epipolar_search_offset_pixels.len());
+
         Ok(StereoFramePointGenerator {
             detectors,
             target_number_of_keypoints,
@@ -133,6 +146,7 @@ impl StereoFramePointGeneratorCfg {
             descriptor_extractor: descriptor_extract,
 
             current_maximum_descriptor_distance_triangulation: 0.1 * 256f32,
+            epipolar_search_distance: epipolar_search_offset_pixels,
         })
     }
 }
@@ -149,6 +163,8 @@ pub struct StereoFramePointGenerator {
     descriptor_extractor: Ptr<DescriptorExtractor>,
 
     current_maximum_descriptor_distance_triangulation: f32,
+
+    epipolar_search_distance: Vec<i32>,
 }
 
 impl StereoFramePointGenerator {
@@ -199,10 +215,15 @@ impl StereoFramePointGenerator {
         let number_of_new_points = 0;
 
         log::debug!("number of new stereo points: {}", number_of_new_points);
+
+        // for i in self.epipolar_search_distance {
+            
+        // }
+
         Ok(())
     }
 
-    pub fn detect_keypoints(
+    fn detect_keypoints(
         &mut self,
         intensity_image: &opencv::core::Mat,
     ) -> anyhow::Result<opencv::core::Vector<KeyPoint>> {
@@ -318,8 +339,8 @@ impl Frame {
 
     pub fn create_framepoint(
         &self,
-        keypoint_left: &KeyPoint,
-        descriptor_left: &Mat,
+        feature_left: &IntensityFeature,
+        feature_right: &IntensityFeature,
         keypoint_right: &KeyPoint,
         descriptor_right: &Mat,
     ) {

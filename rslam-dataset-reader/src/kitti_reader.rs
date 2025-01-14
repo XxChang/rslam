@@ -30,10 +30,11 @@ impl KittiReader {
     }
 
     pub fn get_timestamp(&mut self) -> f64 {
+        let t = self.timestamp[self.current_frame_index];
         self.current_frame_index += 1;
-        self.timestamp[self.current_frame_index]
+        t
     }
-    
+
     pub fn load_camera(&mut self) {
         let calib_file_path = self.dataset_path.join("calib.txt");
 
