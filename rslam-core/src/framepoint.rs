@@ -1,3 +1,3 @@
-pub trait FramePoint {
-    fn identifier(&self) -> usize;
-}
+// pub trait FramePoint {
+//     fn identifier(&self) -> usize;
+// }

@@ -1,6 +1,6 @@
-use std::sync::atomic::AtomicUsize;
-use rslam_core::PointCoordinates;
 use opencv::core::{KeyPoint, KeyPointTraitConst, Mat};
+use rslam_core::PointCoordinates;
+use std::sync::atomic::AtomicUsize;
 
 static IDENTIFIER: AtomicUsize = AtomicUsize::new(0);
 
@@ -39,8 +39,16 @@ impl StereoFramepoint {
             descriptor_right: descriptor_right.clone(),
             disparity_pixels: keypoint_left.pt().x - keypoint_right.pt().y,
 
-            image_coordinates_left: PointCoordinates::new(keypoint_left.pt().x as f64, keypoint_left.pt().y as f64, 1.0),
-            image_coordinates_right: PointCoordinates::new(keypoint_right.pt().x as f64, keypoint_right.pt().y as f64, 1.0),
+            image_coordinates_left: PointCoordinates::new(
+                keypoint_left.pt().x as f64,
+                keypoint_left.pt().y as f64,
+                1.0,
+            ),
+            image_coordinates_right: PointCoordinates::new(
+                keypoint_right.pt().x as f64,
+                keypoint_right.pt().y as f64,
+                1.0,
+            ),
         };
 
         IDENTIFIER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -53,10 +61,11 @@ impl StereoFramepoint {
         feature_right: &IntensityFeature,
     ) -> StereoFramepoint {
         StereoFramepoint::new(
-            &feature_left.keypoint, 
-            &feature_right.keypoint, 
-            &feature_left.descriptor, 
-            &feature_right.descriptor)
+            &feature_left.keypoint,
+            &feature_right.keypoint,
+            &feature_left.descriptor,
+            &feature_right.descriptor,
+        )
     }
 }
 

@@ -1,9 +1,14 @@
-use std::sync::Arc;
+use std::{
+    collections::BTreeSet,
+    num::{NonZero, NonZeroUsize},
+    sync::Arc,
+};
 
 use anyhow::Result;
 use opencv::{
     core::{
-        KeyPoint, KeyPointTrait, KeyPointTraitConst, Mat, MatTraitConst, Point2f, Ptr, Rect, Rect2i,
+        KeyPoint, KeyPointTrait, KeyPointTraitConst, Mat, MatTraitConst, Point2f, Ptr, Rect,
+        Rect2i, NORM_HAMMING,
     },
     features2d::{
         self, DescriptorExtractor, FastFeatureDetector, FastFeatureDetector_DetectorType, ORB,
@@ -12,7 +17,9 @@ use opencv::{
 };
 use serde::Deserialize;
 
-use crate::stereo_framepoint::IntensityFeature;
+use crate::{
+    intensity_feature_matcher::IntensityFeatureMatcher, stereo_framepoint::IntensityFeature,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct StereoFramePointGeneratorCfg {
@@ -127,12 +134,28 @@ impl StereoFramePointGeneratorCfg {
             }
         };
 
+        let mut feature_matcher_left = IntensityFeatureMatcher::default();
+        let mut feature_matcher_right = IntensityFeatureMatcher::default();
+        feature_matcher_left.configure(
+            NonZeroUsize::new(number_of_rows_image).unwrap(),
+            NonZeroUsize::new(number_of_cols_image).unwrap(),
+        );
+        feature_matcher_right.configure(
+            NonZeroUsize::new(number_of_rows_image).unwrap(),
+            NonZeroUsize::new(number_of_cols_image).unwrap(),
+        );
+
         let mut epipolar_search_offset_pixels = vec![0];
         for i in 1..self.maximum_epipolar_search_offset_pixels {
             epipolar_search_offset_pixels.push(i);
             epipolar_search_offset_pixels.push(-i);
         }
-        log::info!("number of epipolar lines considered for stereo matching: {}", epipolar_search_offset_pixels.len());
+
+        log::info!(
+            "number of epipolar lines considered for stereo matching: {}",
+            epipolar_search_offset_pixels.len()
+        );
+        log::info!("configured");
 
         Ok(StereoFramePointGenerator {
             detectors,
@@ -147,6 +170,9 @@ impl StereoFramePointGeneratorCfg {
 
             current_maximum_descriptor_distance_triangulation: 0.1 * 256f32,
             epipolar_search_distance: epipolar_search_offset_pixels,
+
+            feature_matcher_left,
+            feature_matcher_right,
         })
     }
 }
@@ -165,6 +191,9 @@ pub struct StereoFramePointGenerator {
     current_maximum_descriptor_distance_triangulation: f32,
 
     epipolar_search_distance: Vec<i32>,
+
+    feature_matcher_left: IntensityFeatureMatcher,
+    feature_matcher_right: IntensityFeatureMatcher,
 }
 
 impl StereoFramePointGenerator {
@@ -207,19 +236,112 @@ impl StereoFramePointGenerator {
             }
         }
 
-        //todo initialize matchers for left and right frame
+        self.feature_matcher_left
+            .set_fatures(&frame.keypoints_left, &frame.descriptors_left)?;
+        self.feature_matcher_right
+            .set_fatures(&frame.keypoints_right, &frame.descriptors_right)?;
         Ok(())
     }
 
     pub fn compute(&mut self, frame: &Frame) -> Result<()> {
-        let number_of_new_points = 0;
+        self.feature_matcher_left.sort_feature_vector();
+        self.feature_matcher_right.sort_feature_vector();
+
+        let mut number_of_new_points = 0;
+
+        // start stereo matching for all epipolar lines
+        for epipolar_offset in &self.epipolar_search_distance {
+            let features_left = &self.feature_matcher_left.feature_vector;
+            let features_right = &self.feature_matcher_right.feature_vector;
+
+            // 被匹配的特征
+            let mut matched_indices_left = BTreeSet::<usize>::new();
+            let mut matched_indices_right = BTreeSet::<usize>::new();
+
+            let mut index_r = 0;
+            let mut index_l = 0;
+
+            // loop over all left keypoints
+            'out: while index_l < features_left.len() {
+                //if there are no more points on the right to match against - stop
+                if index_r == features_right.len() {
+                    break;
+                }
+
+                //the right keypoints are on an lower row - skip left
+                while features_left[index_l].row < features_right[index_r].row + epipolar_offset {
+                    index_l += 1;
+                    if index_l == features_left.len() {
+                        break 'out;
+                    }
+                }
+
+                let feature_left = features_left[index_l].clone();
+
+                //the right keypoints are on an upper row - skip right
+                while feature_left.row > features_right[index_r].row + epipolar_offset {
+                    index_r += 1;
+                    if index_r == features_right.len() {
+                        break 'out;
+                    }
+                }
+
+                //search bookkeeping
+                let mut index_search_r = index_r;
+                let mut descriptor_distance_best =
+                    self.current_maximum_descriptor_distance_triangulation;
+                let mut index_best_r = 0;
+
+                //scan epipolar line for current keypoint at idx_L - exhaustive
+                while feature_left.row == features_right[index_search_r].row + epipolar_offset {
+                    //invalid disparity stop condition
+                    if feature_left.col - features_right[index_search_r].col < 0 {
+                        break;
+                    }
+
+                    //compute descriptor distance for the stereo match candidates
+                    let descriptor_distance = opencv::core::norm2(
+                        &feature_left.descriptor,
+                        &features_right[index_search_r].descriptor,
+                        NORM_HAMMING,
+                        &Mat::default(),
+                    )?;
+                    if descriptor_distance < descriptor_distance_best as f64 {
+                        descriptor_distance_best = descriptor_distance as f32;
+                        index_best_r = index_search_r;
+                    }
+                    index_search_r += 1;
+                    if index_search_r == features_right.len() {
+                        break;
+                    }
+                }
+
+                // check if something was found
+                if descriptor_distance_best < self.current_maximum_descriptor_distance_triangulation
+                {
+                    number_of_new_points += 1;
+
+                    matched_indices_left.insert(index_l);
+                    matched_indices_right.insert(index_best_r);
+
+                    index_r = index_best_r + 1;
+                }
+                index_l += 1;
+            }
+
+            // remove matched indices from candidate pools
+            self.feature_matcher_left.prune(&matched_indices_left);
+            self.feature_matcher_right.prune(&matched_indices_right);
+
+            log::info!(
+                "epipolar offset: {} number of unmatched features L: {} R: {}",
+                epipolar_offset,
+                self.feature_matcher_left.feature_vector.len(),
+                self.feature_matcher_right.feature_vector.len()
+            );
+        }
 
         log::debug!("number of new stereo points: {}", number_of_new_points);
-
-        // for i in self.epipolar_search_distance {
-            
-        // }
-
         Ok(())
     }
 

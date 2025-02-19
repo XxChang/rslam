@@ -30,8 +30,8 @@ fn main() {
 
         let mut frame = Frame::new(left.clone(), right.clone());
         frame_point_generator.initialize(&mut frame, true).unwrap();
-        let left_keypoints = frame.keypoints_left;
-        let right_keypoints = frame.keypoints_right;
+        let left_keypoints = frame.keypoints_left.clone();
+        let right_keypoints = frame.keypoints_right.clone();
 
         let left_pts: Vec<_> = left_keypoints
             .iter()
@@ -67,5 +67,7 @@ fn main() {
 
         rec.log("image_right/keypoints", &rerun::Points2D::new(right_pts))
             .unwrap();
+
+        frame_point_generator.compute(&frame).unwrap();
     }
 }
