@@ -30,8 +30,8 @@ fn main() {
 
         let mut frame = Frame::new(left.clone(), right.clone());
         frame_point_generator.initialize(&mut frame, true).unwrap();
-        let left_keypoints = frame.keypoints_left.clone();
-        let right_keypoints = frame.keypoints_right.clone();
+
+        let (left_keypoints, right_keypoints) = frame_point_generator.get_epipolar_matches(&mut frame, 0).unwrap();
 
         let left_pts: Vec<_> = left_keypoints
             .iter()
@@ -43,7 +43,7 @@ fn main() {
             .collect();
 
         rec.log(
-            "image_left",
+            "/camera/image_left",
             &rerun::Image::from_elements(
                 left.data_bytes().unwrap(),
                 [left.cols() as u32, left.rows() as u32],
@@ -52,11 +52,11 @@ fn main() {
         )
         .unwrap();
 
-        rec.log("image_left/keypoints", &rerun::Points2D::new(left_pts))
+        rec.log("/camera/image_left/keypoints", &rerun::Points2D::new(left_pts))
             .unwrap();
 
         rec.log(
-            "image_right",
+            "/camera/image_right",
             &rerun::Image::from_elements(
                 right.data_bytes().unwrap(),
                 [right.cols() as u32, right.rows() as u32],
@@ -65,9 +65,14 @@ fn main() {
         )
         .unwrap();
 
-        rec.log("image_right/keypoints", &rerun::Points2D::new(right_pts))
+        rec.log("/camera/image_right/keypoints", &rerun::Points2D::new(right_pts))
             .unwrap();
 
-        frame_point_generator.compute(&frame).unwrap();
+        // let associations: Vec<_> = left_keypoints
+        //     .iter()
+        //     .zip(right_keypoints.iter())
+        //     .map(|(l, r)| (rerun::Position2D::new(l.pt().x, l.pt().y), rerun::Position2D::new(r.pt().x, r.pt().y)))
+        //     .collect();
+        // rerun::
     }
 }
