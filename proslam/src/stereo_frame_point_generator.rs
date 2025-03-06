@@ -1,7 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    num::NonZeroUsize,
-};
+use std::{collections::BTreeSet, num::NonZeroUsize};
 
 use anyhow::Result;
 use opencv::{
@@ -15,9 +12,11 @@ use opencv::{
     prelude::{FastFeatureDetectorTrait, FastFeatureDetectorTraitConst, Feature2DTrait},
 };
 use serde::Deserialize;
-
+use sophus::nalgebra::Vector3;
+use rslam_sensor::pinhole_camera::PinholeCamera;
+use rslam_core::Camera;
 use crate::{
-    intensity_feature_matcher::IntensityFeatureMatcher, stereo_framepoint::IntensityFeature,
+    frame::frame_point::FramePoint, intensity_feature_matcher::IntensityFeatureMatcher, stereo_framepoint::IntensityFeature
 };
 
 #[derive(Debug, Deserialize)]
@@ -60,7 +59,14 @@ impl Default for StereoFramePointGeneratorCfg {
 }
 
 impl StereoFramePointGeneratorCfg {
-    pub fn finalize(self, width: usize, height: usize) -> Result<StereoFramePointGenerator> {
+    pub fn finalize(
+        self,
+        width: usize,
+        height: usize,
+        camera_left: PinholeCamera,
+        camera_right: PinholeCamera,
+        baseline: Vector3<f64>,
+    ) -> Result<StereoFramePointGenerator> {
         let mut detectors = vec![];
         let mut detector_regions = vec![];
         let mut detector_thresholds: Vec<Vec<f32>> = vec![];
@@ -96,6 +102,8 @@ impl StereoFramePointGeneratorCfg {
             detector_regions.push(sub_detector_regions);
             detector_thresholds.push(sub_detector_thresholds);
         }
+
+        let focal_length_pixels  = camera_left.model.params()[0];
 
         let detectors = detectors
             .into_iter()
@@ -157,6 +165,11 @@ impl StereoFramePointGeneratorCfg {
             epipolar_search_offset_pixels.len()
         );
         log::info!("configured");
+        let baseline_pixelsmeters = baseline[0];
+        let baseline_meters = -baseline_pixelsmeters/focal_length_pixels;
+        if baseline_meters < 0.0 {
+            panic!("invalid baseline (m): {}", baseline_meters);
+        }
 
         Ok(StereoFramePointGenerator {
             detectors,
@@ -175,6 +188,14 @@ impl StereoFramePointGeneratorCfg {
             minimum_disparity_pixels: self.minimum_disparity_pixels,
             feature_matcher_left,
             feature_matcher_right,
+
+            camera_left,
+            camera_right,
+
+            baseline,
+            baseline_meters,
+            baseline_pixelsmeters,
+            focal_length_pixels,
         })
     }
 }
@@ -197,6 +218,15 @@ pub struct StereoFramePointGenerator {
 
     feature_matcher_left: IntensityFeatureMatcher,
     feature_matcher_right: IntensityFeatureMatcher,
+
+    camera_right: PinholeCamera,
+    camera_left: PinholeCamera,
+
+    focal_length_pixels: f64,
+
+    baseline: Vector3<f64>,
+    baseline_pixelsmeters: f64,
+    baseline_meters: f64,
 }
 
 impl StereoFramePointGenerator {
@@ -246,7 +276,10 @@ impl StereoFramePointGenerator {
         Ok(())
     }
 
-    pub fn get_epipolar_matches(&mut self, frame: &mut Frame, epipolar_offset: i32) -> Result<(Vec<KeyPoint>, Vec<KeyPoint>)> {
+    pub fn get_epipolar_matches(
+        &mut self,
+        epipolar_offset: i32,
+    ) -> Result<(Vec<KeyPoint>, Vec<KeyPoint>)> {
         self.feature_matcher_left.sort_feature_vector();
         self.feature_matcher_right.sort_feature_vector();
 
@@ -315,13 +348,23 @@ impl StereoFramePointGenerator {
             index_l += 1;
         }
 
-        let left_key_points: Vec<_> =  matched_indices_left.iter().map(|x| {
-            self.feature_matcher_left.feature_vector[*x].keypoint.clone()
-        }).collect();
+        let left_key_points: Vec<_> = matched_indices_left
+            .iter()
+            .map(|x| {
+                self.feature_matcher_left.feature_vector[*x]
+                    .keypoint
+                    .clone()
+            })
+            .collect();
 
-        let right_key_points: Vec<_> =  matched_indices_right.iter().map(|x| {
-            self.feature_matcher_right.feature_vector[*x].keypoint.clone()
-        }).collect();
+        let right_key_points: Vec<_> = matched_indices_right
+            .iter()
+            .map(|x| {
+                self.feature_matcher_right.feature_vector[*x]
+                    .keypoint
+                    .clone()
+            })
+            .collect();
 
         self.feature_matcher_left.prune(&matched_indices_left);
         self.feature_matcher_right.prune(&matched_indices_right);
@@ -331,7 +374,8 @@ impl StereoFramePointGenerator {
 
     pub fn compute_frame_point(&mut self, frame: &mut Frame) -> Result<()> {
         for epipolar_offset in self.epipolar_search_distance.clone() {
-            let (features_left, features_right) = self.get_epipolar_matches(frame, epipolar_offset)?;
+            let (features_left, features_right) =
+                self.get_epipolar_matches(epipolar_offset)?;
 
             // 跳过视差太小的两点
             for (feature_left, feature_right) in features_left.iter().zip(features_right.iter()) {
@@ -340,11 +384,38 @@ impl StereoFramePointGenerator {
                     continue;
                 }
 
-                
+                let point_in_left = self.get_point_in_left_camera(feature_left, feature_right);
+                frame.create_framepoint(&point_in_left, &self.camera_left);
             }
+
+            log::debug!(
+                "epipolar offset: {}, number of matched features L:  {} R: {}",
+                epipolar_offset,
+                features_left.len(),
+                features_right.len()
+            );
         }
 
         Ok(())
+    }
+
+    fn get_point_in_left_camera(&self, feature_left: &KeyPoint, feature_right: &KeyPoint) -> sophus::nalgebra::Vector3<f64> {
+        assert!(feature_left.pt().x >= feature_right.pt().x);
+        assert!(feature_left.pt().x - feature_right.pt().x >= self.minimum_disparity_pixels);
+
+        let f_x = self.camera_right.model.params()[0];
+        let f_y = self.camera_right.model.params()[1];
+        let c_x = self.camera_right.model.params()[2];
+        let c_y = self.camera_right.model.params()[3];
+
+        let b_x = self.baseline_pixelsmeters;
+        let z = b_x / ((feature_right.pt().x - feature_left.pt().x) as f64);
+        let x = 1.0/f_x * (feature_left.pt().x as f64 - c_x) * z;
+
+        // average in case we have an epipolar offset in v
+        let y = 1.0/f_y * ((feature_left.pt().y + feature_right.pt().x) as f64 / 2.0 - c_y) * z;
+
+        sophus::nalgebra::Vector3::new(x, y, z)
     }
 
     fn detect_keypoints(
@@ -432,6 +503,10 @@ pub struct Frame {
     pub number_of_detected_keypoints: usize,
 
     pub status: FrameStatus,
+
+    pub robot_to_world: sophus::lie::Isometry3F64,
+
+    pub created_points: Vec<FramePoint>,
 }
 
 #[derive(PartialEq, Eq, Debug)]
@@ -458,15 +533,24 @@ impl Frame {
             number_of_detected_keypoints: 0,
 
             status: FrameStatus::Localizing,
+            robot_to_world: sophus::lie::Isometry3F64::identity(),
+
+            created_points: vec![],
         }
     }
 
     pub fn create_framepoint(
-        &self,
-        feature_left: &IntensityFeature,
-        feature_right: &IntensityFeature,
-        keypoint_right: &KeyPoint,
-        descriptor_right: &Mat,
+        &mut self,
+        camera_coordinates_left: &Vector3<f64>,
+        camera: &PinholeCamera
     ) {
+        let point_in_robot = camera.camera_to_robot().transform(camera_coordinates_left);
+        let point_in_world = self.robot_to_world().transform(&point_in_robot);
+        let frame_point = FramePoint::new(camera_coordinates_left.clone(), point_in_world, point_in_world);
+        self.created_points.push(frame_point);
+    }
+
+    fn robot_to_world(&self) -> &sophus::lie::Isometry3F64 {
+        &self.robot_to_world
     }
 }

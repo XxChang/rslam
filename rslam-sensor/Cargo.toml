@@ -9,3 +9,4 @@ version.workspace = true
 num = "0.4.3"
 serde.workspace = true
 sophus.workspace = true
+rslam-core.workspace = true

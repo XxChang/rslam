@@ -3,19 +3,19 @@ use opencv::{
     prelude::*,
 };
 use rslam_core::Camera;
-use rslam_sensor::HasStereoCamera;
+use rslam_sensor::{pinhole_camera::PinholeCamera, HasStereoCamera};
 use sophus::{
-    core::linalg::VecF64, image::ImageSize, lie::Isometry3F64,
-    sensor::camera_enum::perspective_camera::PinholeCameraF64,
+    core::linalg::VecF64, image::ImageSize, lie::Isometry3F64, nalgebra::Vector3, sensor::camera_enum::perspective_camera::PinholeCameraF64
 };
 use std::{io::BufRead, path::PathBuf};
 
 pub struct KittiReader {
     dataset_path: PathBuf,
-    cameras: Vec<PinholeCameraF64>,
+    cameras: Vec<PinholeCamera>,
     cameras_pos: Vec<Isometry3F64>,
     timestamp: Vec<f64>,
     current_frame_index: usize,
+    pub baseline_pixel: Vector3<f64>,
 }
 
 impl KittiReader {
@@ -26,6 +26,7 @@ impl KittiReader {
             cameras_pos: vec![],
             timestamp: vec![],
             current_frame_index: 0,
+            baseline_pixel: Vector3::zeros(),
         }
     }
 
@@ -33,6 +34,14 @@ impl KittiReader {
         let t = self.timestamp[self.current_frame_index];
         self.current_frame_index += 1;
         t
+    }
+
+    pub fn get_cameras(&self) -> &Vec<PinholeCamera> {
+        &self.cameras
+    }
+
+    pub fn get_cameres_pos(&self) -> &Vec<Isometry3F64> {
+        &self.cameras_pos
     }
 
     pub fn load_camera(&mut self) {
@@ -55,19 +64,25 @@ impl KittiReader {
                 let fy = message_collect[5].parse::<f64>().unwrap();
                 let cx = message_collect[2].parse::<f64>().unwrap();
                 let cy = message_collect[6].parse::<f64>().unwrap();
-                let x = -1f64 * message_collect[3].parse::<f64>().unwrap();
-                let y = -1f64 * message_collect[7].parse::<f64>().unwrap();
-                let z = -1f64 * message_collect[11].parse::<f64>().unwrap();
+                let x = message_collect[3].parse::<f64>().unwrap();
+                let y =  message_collect[7].parse::<f64>().unwrap();
+                let z =  message_collect[11].parse::<f64>().unwrap();
 
-                self.cameras.push(PinholeCameraF64::from_params_and_size(
+                let camera = PinholeCameraF64::from_params_and_size(
                     &VecF64::<4>::new(fx, fy, cx, cy),
                     ImageSize::new(1241, 376),
-                ));
-
+                );
+                log::debug!("loaded camera calibration matrix: {:?}", camera);
+                self.cameras.push(PinholeCamera::new(camera));
+                if x != 0.0 {
+                    let baseline_pixels = Vector3::<f64>::new(x, y, z);
+                    log::debug!("with baseline (pixels): {}", baseline_pixels.transpose());
+                    self.baseline_pixel = baseline_pixels;
+                }
                 self.cameras_pos
                     .push(Isometry3F64::from_translation(&VecF64::<3>::new(
-                        x / fx,
-                        y / fy,
+                        x,
+                        y,
                         z,
                     )));
             }
@@ -119,12 +134,3 @@ impl HasStereoCamera for &mut KittiReader {
     }
 }
 
-impl Camera for KittiReader {
-    fn rows(&self) -> usize {
-        self.cameras[0].image_size().height
-    }
-
-    fn cols(&self) -> usize {
-        self.cameras[0].image_size().width
-    }
-}

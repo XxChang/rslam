@@ -3,7 +3,6 @@ pub use dataset::*;
 mod camera;
 pub use camera::*;
 pub mod frame;
-pub mod frame_point_generator;
 pub mod framepoint;
 
 use sophus::nalgebra::Vector3;
